@@ -1,6 +1,6 @@
 # find-loved
 
-Fetch all your loved tracks from last.fm, find them on your local filesystem and output a playlist for your player of choice.
+Find your last.fm "loved tracks" on your local machine and generate a playlist for use in a media player of your choice.
 
 ## Status
 
