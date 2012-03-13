@@ -12,6 +12,12 @@
 (def LIMIT 50)
 (def LOVED_URL "http://ws.audioscrobbler.com/2.0/?method=user.getlovedtracks&user=%s&api_key=%s&page=%d&limit=%d")
 
+; A track returned from last.fm's API
+(defrecord LovedTrack [artist-name track-name date-added])
+
+; A track found in the local file system
+(defrecord FsTrack [artist-name track-name path])
+
 (defn get-api-key
   "Returns the last.fm API key found in ~/.lastfm_api_key, or nil if that can't
   be found."
@@ -21,12 +27,13 @@
     (when (.exists f)
       (.trim (slurp f)))))
 
-(defn make-track
-  "Turn the given Clojure XML zipper into a track object."
+(defn mk-loved-track
+  "Turn the given Clojure XML zipper into a LovedTrack record."
   [z]
-    {:artist-name (xml1-> z :artist :name text)
-     :track-name (xml1-> z :name text)
-     :date-added (xml1-> z :date (attr :uts))})
+    (LovedTrack.
+      (xml1-> z :artist :name text)
+      (xml1-> z :name text)
+      (xml1-> z :date (attr :uts))))
 
 (defn str-to-xml 
   "Parse given string into Clojure's tag/attrs/content format."
@@ -35,18 +42,21 @@
     (xml/parse xml-in)))
 
 (defn ser
-  "Write obj to filename in a way that Clojure's reader can read it back in."
+  "Write obj to filename in a way that Clojure's reader can read it back in.
+  Returns obj."
   [filename obj]
   (with-open [w (io/writer filename)]
     (binding [*out* w
               *print-dup* true]
-      (prn obj))))
+      (prn obj)))
+  obj)
 
 (defn deser
-  "Reads whatever's in filename and returns it."
-  [filename]
-  (with-open [r (java.io.PushbackReader. (io/reader filename))]
-    (binding [*read-eval* false]
+  "Reads a single Clojure data structure from f and returns it. f is anything
+  that can be coerced into a File."
+  [f]
+  (with-open [r (java.io.PushbackReader. (io/reader f))]
+    (binding [*read-eval* false]  ; blow up if reader macro '#=' shows up in file
       (read r))))
 
 (defn get-tracks
@@ -55,12 +65,21 @@
   ([user api-key] (get-tracks user api-key 1))
   ([user api-key page]
    (lazy-seq
-     (let [resp (do #_(println (format "\nreq page %d\n" page)) (client/get (format LOVED_URL user api-key page LIMIT)))
+     (let [resp (client/get (format LOVED_URL user api-key page LIMIT))
            zipped (zip/xml-zip (str-to-xml (:body resp)))
            total (Integer/valueOf (xml1-> zipped :lovedtracks (attr :totalPages)))
-           tracks (map make-track (xml-> zipped :lovedtracks :track))]
+           tracks (map mk-loved-track (xml-> zipped :lovedtracks :track))]
        (when (<= page total)
          (concat tracks (get-tracks user api-key (inc page))))))))
+
+(defn get-tracks-cached
+  "If we have a cached copy of the loved tracks on disk, use them, otherwise
+  forward call to get-tracks."
+  [user api-key]
+  (let [f (io/as-file (format ".%s_loved_tracks" user))]
+    (if (.exists f)
+      (deser f)
+      (ser (.getName f) (get-tracks user api-key))))) ; get all the tracks, cache 'em on disk, return 'em
 
 (defn -main [& args]
   (let [[opts args banner] (cli args 
@@ -69,7 +88,7 @@
                                 ["--debug" "Output a lot of junk" :flag true])
         api-key (or (:api-key opts) (get-api-key))
         [user & roots] args
-        tracks (get-tracks user api-key)]
+        tracks (get-tracks-cached user api-key)]
     (when (:help opts)
       (println "find-loved LASTFM-USERNAME FS-ROOT0 [RS-ROOT1 [..]]")
       (println banner)

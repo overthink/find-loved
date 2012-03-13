@@ -7,4 +7,5 @@
 /checkouts
 /.lein-deps-sum
 *swp
+.*_loved_tracks
 
