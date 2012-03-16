@@ -6,7 +6,8 @@
             [clojure.xml :as xml]
             [clojure.zip :as zip]
             [clojure.java.io :as io])
-  (:import [org.jaudiotagger.audio AudioFileIO AudioFileFilter]
+  (:import [java.util.logging Logger]
+           [org.jaudiotagger.audio AudioFileIO AudioFileFilter]
            [org.jaudiotagger.tag FieldKey])
   (:gen-class))
 
@@ -45,7 +46,7 @@
   FsTrack if possible, or nil if we couldn't read meta-data from the file."
   [^java.io.File file]
   (when (.accept audio-file-filter file)
-    (let [tag (-> (AudioFileIO/read file) (.getTag))
+    (let [tag (-> (AudioFileIO/read file) #_(.getTag) (.getID3v2Tag))
           artist (.getFirst tag FieldKey/ARTIST)
           track (.getFirst tag FieldKey/TITLE)
           album (.getFirst tag FieldKey/ALBUM)]
@@ -97,8 +98,19 @@
       (deser f)
       (ser (.getName f) (get-tracks user api-key))))) ; get all the tracks, cache 'em on disk, return 'em
 
+(defn disable-jul
+  "Just turn off java.util.logging outright by removing all the handlers on the
+  root logger. jaudiotagger spams tons of INFO logs by default."
+  []
+  (let [root (Logger/getLogger "")
+        handlers (.getHandlers root)]
+    (doseq [h handlers]
+      (.removeHandler root h))))
+
 (defn -main [& args]
-  (let [[opts args banner] (cli args 
+  (set! *warn-on-reflection* true)
+  (disable-jul)
+  (time (let [[opts args banner] (cli args 
                                 ["--api-key" "last.fm API key, if not set users $HOME/.lastfm_api_key"]
                                 ["-h" "--help" "Show help and exit" :flag true]
                                 ["--debug" "Output a lot of junk" :flag true])
@@ -107,15 +119,17 @@
         fs-tracks (->> roots 
                     (map io/as-file)
                     (mapcat file-seq)
-                    (map mk-fs-track))
+                    (map mk-fs-track)
+                    (filter (complement nil?)))
         loved-tracks (get-tracks-cached user api-key)]
     (when (:help opts)
       (println "find-loved LASTFM-USERNAME FS-ROOT0 [RS-ROOT1 [..]]")
       (println banner)
       (System/exit 1))
-    (doseq [t loved-tracks]
-      (println (format "%s - %s" (:artist-name t) (:track-name t))))
-    (doseq [t fs-tracks]
+    #_(doseq [t loved-tracks]
+      (format "%s - %s" (:artist-name t) (:track-name t)))
+    #_(doseq [t fs-tracks]
       (prn t))
-    (println (format "\nTotal: %d tracks" (count loved-tracks)))))
+    (println (format "%d loved tracks" (count loved-tracks)))
+    (println (format "%d fs tracks" (count fs-tracks))))))
 
