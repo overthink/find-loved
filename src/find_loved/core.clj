@@ -44,15 +44,15 @@
 (defn mk-fs-track
   "Make a track record for a music file on the local filesystem.  Returns a
   FsTrack if possible, or nil if we couldn't read meta-data from the file."
-  [^java.io.File file]
+  [file]
   (when (.accept audio-file-filter file)
-    (let [tag (-> (AudioFileIO/read file) #_(.getTag) (.getID3v2Tag))
+    (let [tag (-> (AudioFileIO/read file) (.getTag) #_(.getID3v2Tag))
           artist (.getFirst tag FieldKey/ARTIST)
           track (.getFirst tag FieldKey/TITLE)
           album (.getFirst tag FieldKey/ALBUM)]
       (FsTrack. artist track album (.getAbsolutePath file)))))
 
-(defn str-to-xml 
+(defn str-to-xml
   "Parse given string into Clojure's tag/attrs/content format."
   [s]
   (with-open [xml-in (io/input-stream (.getBytes s "UTF-8"))]
@@ -98,9 +98,33 @@
       (deser f)
       (ser (.getName f) (get-tracks user api-key))))) ; get all the tracks, cache 'em on disk, return 'em
 
-(defn disable-jul
+(defn mk-track-db
+  "Return a new, empty track database."
+  []
+  {:by-artist-name {}
+   :by-track-name  {}})
+
+(defn normalize
+  "Normalize s for use as a key in our track db indexes."
+  [s]
+  (-> s (.toLowerCase) (.trim)))
+
+(defn add-track
+  "Add an FsTrack to the given track db.  Return the new db."
+  [db track]
+  (let [upd (fn [db0 idx-name key-field]
+              (update-in db0 [idx-name (normalize (key-field track))]
+                         ; make sure the list of tracks is actually a vector
+                         ; (associative) so we can use get-in later.
+                         #(conj (vec %1) %2) track))]
+    (-> db
+      (upd :by-artist-name :artist-name)
+      (upd :by-track-name :track-name))))
+
+(defn disable-jul!
   "Just turn off java.util.logging outright by removing all the handlers on the
-  root logger. jaudiotagger spams tons of INFO logs by default."
+  root logger. jaudiotagger spams tons of INFO logs by default, and there
+  appeared to be a big performance impact as well."
   []
   (let [root (Logger/getLogger "")
         handlers (.getHandlers root)]
@@ -109,18 +133,19 @@
 
 (defn -main [& args]
   (set! *warn-on-reflection* true)
-  (disable-jul)
-  (time (let [[opts args banner] (cli args 
+  (disable-jul!)
+  (time (let [[opts args banner] (cli args
                                 ["--api-key" "last.fm API key, if not set users $HOME/.lastfm_api_key"]
                                 ["-h" "--help" "Show help and exit" :flag true]
                                 ["--debug" "Output a lot of junk" :flag true])
         api-key (or (:api-key opts) (get-api-key))
         [user & roots] args
-        fs-tracks (->> roots 
+        fs-tracks (->> roots
                     (map io/as-file)
                     (mapcat file-seq)
                     (map mk-fs-track)
-                    (filter (complement nil?)))
+                    (remove nil?))
+        track-db (reduce add-track (mk-track-db) fs-tracks)
         loved-tracks (get-tracks-cached user api-key)]
     (when (:help opts)
       (println "find-loved LASTFM-USERNAME FS-ROOT0 [RS-ROOT1 [..]]")
@@ -130,6 +155,8 @@
       (format "%s - %s" (:artist-name t) (:track-name t)))
     #_(doseq [t fs-tracks]
       (prn t))
+    (println (format "%d unique track names on disk" (count (get-in track-db [:by-track-name]))))
     (println (format "%d loved tracks" (count loved-tracks)))
     (println (format "%d fs tracks" (count fs-tracks))))))
+
 
