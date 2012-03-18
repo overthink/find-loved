@@ -3,6 +3,7 @@
   (:use [clojure.tools.cli :only (cli)]
         [clojure.data.zip.xml :only (attr text xml-> xml1->)])
   (:require [clj-http.client :as client]
+            [clojure.string :as str]
             [clojure.xml :as xml]
             [clojure.zip :as zip]
             [clojure.java.io :as io])
@@ -98,28 +99,38 @@
       (deser f)
       (ser (.getName f) (get-tracks user api-key))))) ; get all the tracks, cache 'em on disk, return 'em
 
-(defn mk-track-db
+#_(defn mk-track-db
   "Return a new, empty track database."
   []
   {:by-artist-name {}
    :by-track-name  {}})
 
 (defn normalize
-  "Normalize s for use as a key in our track db indexes."
+  "Normalize s for use as a key in our track db indexes.  Lowercase everything,
+  clean up spacing, etc.  Ghetto tokenizing, effectively."
   [s]
-  (-> s (.toLowerCase) (.trim)))
+  (-> s (.toLowerCase) (.trim) (str/replace #"\s+" " ")))
+
+(defn artist-keys
+  "Returns a seq of keys under which tracks from the given artist should be
+  stored.  e.g. 'The Decemberists' should be stored under 'the decemberists',
+  and 'decemberists'."
+  [artist]
+  (let [nrm (normalize artist)]
+    (if (.startsWith nrm "the ")
+      [nrm (str/replace nrm #"^the " "")]
+      [nrm])))
 
 (defn add-track
   "Add an FsTrack to the given track db.  Return the new db."
   [db track]
-  (let [upd (fn [db0 idx-name key-field]
-              (update-in db0 [idx-name (normalize (key-field track))]
-                         ; make sure the list of tracks is actually a vector
-                         ; (associative) so we can use get-in later.
-                         #(conj (vec %1) %2) track))]
-    (-> db
-      (upd :by-artist-name :artist-name)
-      (upd :by-track-name :track-name))))
+  (let [upd (fn [db0 idx k] (update-in db0 [idx k] #(conj (set %1) %2) track))
+        ; This code is lame: update the by-artist-name index, save the result,
+        ; then in that result update the by-track-name index.
+        db1 (reduce #(upd %1 :by-artist-name %2) 
+                    db
+                    (artist-keys (:artist-name track)))]
+      (upd db1 :by-track-name (normalize (:track-name track)))))
 
 (defn disable-jul!
   "Just turn off java.util.logging outright by removing all the handlers on the
@@ -134,29 +145,36 @@
 (defn -main [& args]
   (set! *warn-on-reflection* true)
   (disable-jul!)
-  (time (let [[opts args banner] (cli args
+  (let [[opts args banner] (cli args
                                 ["--api-key" "last.fm API key, if not set users $HOME/.lastfm_api_key"]
                                 ["-h" "--help" "Show help and exit" :flag true]
                                 ["--debug" "Output a lot of junk" :flag true])
         api-key (or (:api-key opts) (get-api-key))
         [user & roots] args
+        loved-tracks (get-tracks-cached user api-key)
         fs-tracks (->> roots
                     (map io/as-file)
                     (mapcat file-seq)
                     (map mk-fs-track)
                     (remove nil?))
-        track-db (reduce add-track (mk-track-db) fs-tracks)
-        loved-tracks (get-tracks-cached user api-key)]
+        track-db (reduce add-track {} fs-tracks)]
     (when (:help opts)
       (println "find-loved LASTFM-USERNAME FS-ROOT0 [RS-ROOT1 [..]]")
       (println banner)
       (System/exit 1))
-    #_(doseq [t loved-tracks]
-      (format "%s - %s" (:artist-name t) (:track-name t)))
-    #_(doseq [t fs-tracks]
-      (prn t))
-    (println (format "%d unique track names on disk" (count (get-in track-db [:by-track-name]))))
-    (println (format "%d loved tracks" (count loved-tracks)))
-    (println (format "%d fs tracks" (count fs-tracks))))))
 
+    ; Hey look, it actually matches stuff now.  Really basic matcher just to
+    ; see it working.
+    (doseq [t loved-tracks]
+      (if-let [ms (get-in track-db [:by-track-name (normalize (:track-name t))])]
+        (println (format "%s - %s => %s" 
+                         (:artist-name t)
+                         (:track-name t)
+                         (apply str (interpose ", " (map :path ms)))))))
+
+    (println "")
+    (println (format "%d unique track names in db" (count (get-in track-db [:by-track-name]))))
+    (println (format "%d artist name variations in db" (count (get-in track-db [:by-artist-name]))))
+    (println (format "%d loved tracks" (count loved-tracks)))
+    (println (format "%d fs tracks" (count fs-tracks)))))
 
