@@ -8,4 +8,5 @@
 /.lein-deps-sum
 *swp
 .*_loved_tracks
+*.m3u
 

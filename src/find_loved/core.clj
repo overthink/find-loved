@@ -16,6 +16,8 @@
 (def LIMIT 50)
 (def LOVED_URL "http://ws.audioscrobbler.com/2.0/?method=user.getlovedtracks&user=%s&api_key=%s&page=%d&limit=%d")
 
+(defn debug [msg] (binding [*out* *err*] (println msg)))
+
 (defn get-api-key
   "Returns the last.fm API key found in ~/.lastfm_api_key, or nil if that can't
   be found."
@@ -26,18 +28,24 @@
       (.trim (slurp f)))))
 
 ; A track returned from last.fm's API
-(defrecord LovedTrack [artist-name track-name date-added])
+(defrecord LovedTrack [artist-name mb-artist-id track-name mb-track-id date-added])
 
 ; A track found in the local file system
-(defrecord FsTrack [artist-name track-name album-name path])
+(defrecord FsTrack [artist-name mb-artist-id track-name mb-track-id album-name year path])
+
+(defn- nonempty "Change empty string to nil" 
+  [s] (if (= "" s) nil s))
 
 (defn mk-loved-track
   "Turn the given Clojure XML zipper into a LovedTrack record."
   [z]
+  (let [getval (fn [& preds] (-> (apply xml1-> z preds) (nonempty)))]
     (LovedTrack.
-      (xml1-> z :artist :name text)
-      (xml1-> z :name text)
-      (xml1-> z :date (attr :uts))))
+      (getval :artist :name text)
+      (getval :artist :mbid text)
+      (getval :name text) ; track name
+      (getval :mbid text) ; musicbrainz track id
+      (getval :date (attr :uts)))))
 
 ; We only need one of these filters, so make it a 'global' in the namespace.
 (def audio-file-filter (AudioFileFilter. false))
@@ -47,11 +55,15 @@
   FsTrack if possible, or nil if we couldn't read meta-data from the file."
   [file]
   (when (.accept audio-file-filter file)
-    (let [tag (-> (AudioFileIO/read file) (.getTag) #_(.getID3v2Tag))
-          artist (.getFirst tag FieldKey/ARTIST)
-          track (.getFirst tag FieldKey/TITLE)
-          album (.getFirst tag FieldKey/ALBUM)]
-      (FsTrack. artist track album (.getAbsolutePath file)))))
+    (let [tag (-> (AudioFileIO/read file) (.getTag))
+          f (fn [field] (-> (.getFirst tag field) (nonempty)))
+          artist    (f FieldKey/ARTIST)
+          artist-id (f FieldKey/MUSICBRAINZ_ARTISTID)
+          track     (f FieldKey/TITLE)
+          track-id  (f FieldKey/MUSICBRAINZ_TRACK_ID)
+          album     (f FieldKey/ALBUM)
+          year      (f FieldKey/YEAR)]
+      (FsTrack. artist artist-id track track-id album year (.getAbsolutePath file)))))
 
 (defn str-to-xml
   "Parse given string into Clojure's tag/attrs/content format."
@@ -99,12 +111,6 @@
       (deser f)
       (ser (.getName f) (get-tracks user api-key))))) ; get all the tracks, cache 'em on disk, return 'em
 
-#_(defn mk-track-db
-  "Return a new, empty track database."
-  []
-  {:by-artist-name {}
-   :by-track-name  {}})
-
 (defn normalize
   "Normalize s for use as a key in our track db indexes.  Lowercase everything,
   clean up spacing, etc.  Ghetto tokenizing, effectively."
@@ -142,13 +148,26 @@
     (doseq [h handlers]
       (.removeHandler root h))))
 
+(defn pr-m3u-line 
+  "Print a m3u-compatible line of text to *out* for the given track."
+  [t]
+  (println (:path t)))
+
+(defn best-match
+  "When a bunch of FsTrack objects seem to match a LovedTrack, this function
+  picks the best one.  Total BS right now: just prefers the oldest track."
+  [loved-track fs-tracks]
+  (->> fs-tracks 
+    (sort-by #(Integer/valueOf (-> (or (:year %) "9999") (subs 0 4))) ; default to 9999, only look at first 4 chars
+             <) ; oldest to newest, no year -> sort last
+    (first)))
+
 (defn -main [& args]
   (set! *warn-on-reflection* true)
   (disable-jul!)
   (let [[opts args banner] (cli args
                                 ["--api-key" "last.fm API key, if not set users $HOME/.lastfm_api_key"]
-                                ["-h" "--help" "Show help and exit" :flag true]
-                                ["--debug" "Output a lot of junk" :flag true])
+                                ["-h" "--help" "Show help and exit" :flag true])
         api-key (or (:api-key opts) (get-api-key))
         [user & roots] args
         loved-tracks (get-tracks-cached user api-key)
@@ -167,14 +186,10 @@
     ; see it working.
     (doseq [t loved-tracks]
       (if-let [ms (get-in track-db [:by-track-name (normalize (:track-name t))])]
-        (println (format "%s - %s => %s" 
-                         (:artist-name t)
-                         (:track-name t)
-                         (apply str (interpose ", " (map :path ms)))))))
+        (pr-m3u-line (best-match t ms))))
 
-    (println "")
-    (println (format "%d unique track names in db" (count (get-in track-db [:by-track-name]))))
-    (println (format "%d artist name variations in db" (count (get-in track-db [:by-artist-name]))))
-    (println (format "%d loved tracks" (count loved-tracks)))
-    (println (format "%d fs tracks" (count fs-tracks)))))
+    (debug (format "%d unique track names in db" (count (get-in track-db [:by-track-name]))))
+    (debug (format "%d artist name variations in db" (count (get-in track-db [:by-artist-name]))))
+    (debug (format "%d loved tracks" (count loved-tracks)))
+    (debug (format "%d fs tracks" (count fs-tracks)))))
 
