@@ -10,11 +10,13 @@ In progress.  Can generate m3u-compatible playlist, but the matching of loved tr
 
 You'll need [Leiningen](https://github.com/technomancy/leiningen) (painless install) unless I ever release a .jar file.
 
+Here's an example invoaction:
+
     lein run overthink ~/music /data/some_other_music /nas/yet/another/dir > loved.m3u
 
-More detailed:
+More details:
 
-    lein run --api-key <your key> <last.fm username> folder0 folder1 ... folderN
+    lein run --api-key <your key> <last.fm username> searchdir0 searchdir1 ... searchdirN
 
 Put your api key in `~/.lastfm_api_key` and omit `--api-key` to make it suck less.
 

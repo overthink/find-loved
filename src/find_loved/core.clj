@@ -178,7 +178,7 @@
                     (remove nil?))
         track-db (reduce add-track {} fs-tracks)]
     (when (:help opts)
-      (println "find-loved LASTFM-USERNAME FS-ROOT0 [RS-ROOT1 [..]]")
+      (println "find-loved LASTFM-USERNAME SEARCH_DIR0 [SEARCH_DIR1 [..]]")
       (println banner)
       (System/exit 1))
 
