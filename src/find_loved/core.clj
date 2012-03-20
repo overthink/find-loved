@@ -56,14 +56,16 @@
   [file]
   (when (.accept audio-file-filter file)
     (let [tag (-> (AudioFileIO/read file) (.getTag))
-          f (fn [field] (-> (.getFirst tag field) (nonempty)))
-          artist    (f FieldKey/ARTIST)
-          artist-id (f FieldKey/MUSICBRAINZ_ARTISTID)
-          track     (f FieldKey/TITLE)
-          track-id  (f FieldKey/MUSICBRAINZ_TRACK_ID)
-          album     (f FieldKey/ALBUM)
-          year      (f FieldKey/YEAR)]
-      (FsTrack. artist artist-id track track-id album year (.getAbsolutePath file)))))
+          f (fn [field] (-> (.getFirst tag field) (nonempty)))]
+      (when tag
+        (FsTrack. 
+          (f FieldKey/ARTIST)
+          (f FieldKey/MUSICBRAINZ_ARTISTID)
+          (f FieldKey/TITLE)
+          (f FieldKey/MUSICBRAINZ_TRACK_ID)
+          (f FieldKey/ALBUM)
+          (f FieldKey/YEAR)
+          (.getAbsolutePath file))))))
 
 (defn str-to-xml
   "Parse given string into Clojure's tag/attrs/content format."
@@ -114,8 +116,9 @@
 (defn normalize
   "Normalize s for use as a key in our track db indexes.  Lowercase everything,
   clean up spacing, etc.  Ghetto tokenizing, effectively."
-  [s]
-  (-> s (.toLowerCase) (.trim) (str/replace #"\s+" " ")))
+  [^String s]
+  (when s
+    (-> s (.toLowerCase) (.trim) (str/replace #"\s+" " "))))
 
 (defn artist-keys
   "Returns a seq of keys under which tracks from the given artist should be
@@ -123,7 +126,7 @@
   and 'decemberists'."
   [artist]
   (let [nrm (normalize artist)]
-    (if (.startsWith nrm "the ")
+    (if (and nrm (.startsWith nrm "the "))
       [nrm (str/replace nrm #"^the " "")]
       [nrm])))
 
