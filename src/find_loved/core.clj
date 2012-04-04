@@ -152,7 +152,7 @@
 (defn pr-m3u-line 
   "Print a m3u-compatible line of text to *out* for the given track."
   [t]
-  (println (:path t)) (flush))
+  (println (:path t)))
 
 (defn best-match
   "When a bunch of FsTrack objects seem to match a LovedTrack, this function
