@@ -16,8 +16,6 @@
 (def LIMIT 50)
 (def LOVED_URL "http://ws.audioscrobbler.com/2.0/?method=user.getlovedtracks&user=%s&api_key=%s&page=%d&limit=%d")
 
-(defn debug [msg] (binding [*out* *err*] (println msg)))
-
 (defn get-api-key
   "Returns the last.fm API key found in ~/.lastfm_api_key, or nil if that can't
   be found."
@@ -154,7 +152,7 @@
 (defn pr-m3u-line 
   "Print a m3u-compatible line of text to *out* for the given track."
   [t]
-  (println (:path t)))
+  (println (:path t)) (flush))
 
 (defn best-match
   "When a bunch of FsTrack objects seem to match a LovedTrack, this function
@@ -165,11 +163,22 @@
              <) ; oldest to newest, no year -> sort last
     (first)))
 
+(defn print-misses 
+  "Print info about the loved tracks that we could not match."
+  [misses]
+  (let [grouped (group-by :artist-name misses)
+        sorted (sort-by #(* -1 (count (second %))) grouped)] ; show artists with most missing tracks first
+    (doseq [[artist tracks] sorted]
+      (println (str artist ":"))
+        (doseq [t tracks]
+          (println (str "  - " (:track-name t)))))))
+
 (defn -main [& args]
   (set! *warn-on-reflection* true)
   (disable-jul!)
   (let [[opts args banner] (cli args
                                 ["--api-key" "last.fm API key, if not set users $HOME/.lastfm_api_key"]
+                                ["--quiet" "Don't write informative stuff on stderr."]
                                 ["-h" "--help" "Show help and exit" :flag true])
         api-key (or (:api-key opts) (get-api-key))
         [user & roots] args
@@ -179,7 +188,8 @@
                     (mapcat file-seq)
                     (map mk-fs-track)
                     (remove nil?))
-        track-db (reduce add-track {} fs-tracks)]
+        track-db (reduce add-track {} fs-tracks)
+        misses (atom [])]
     (when (:help opts)
       (println "find-loved LASTFM-USERNAME SEARCH_DIR0 [SEARCH_DIR1 [..]]")
       (println banner)
@@ -188,11 +198,18 @@
     ; Hey look, it actually matches stuff now.  Really basic matcher just to
     ; see it working.
     (doseq [t loved-tracks]
-      (if-let [ms (get-in track-db [:by-track-name (normalize (:track-name t))])]
-        (pr-m3u-line (best-match t ms))))
+      (let [matches (get-in track-db [:by-track-name (normalize (:track-name t))])]
+        (if matches
+          (pr-m3u-line (best-match t matches))
+          (swap! misses conj t))))
 
-    (debug (format "%d unique track names in db" (count (get-in track-db [:by-track-name]))))
-    (debug (format "%d artist name variations in db" (count (get-in track-db [:by-artist-name]))))
-    (debug (format "%d loved tracks" (count loved-tracks)))
-    (debug (format "%d fs tracks" (count fs-tracks)))))
+    (when-not (:quiet opts)
+      (binding [*out* *err*]
+        (print-misses @misses)
+        (println)
+        (println (format "%d missing loved tracks" (count @misses)))
+        (println (format "%d unique track names in db" (count (get-in track-db [:by-track-name]))))
+        (println (format "%d artist name variations in db" (count (get-in track-db [:by-artist-name]))))
+        (println (format "%d loved tracks" (count loved-tracks)))
+        (println (format "%d fs tracks" (count fs-tracks)))))))
 
