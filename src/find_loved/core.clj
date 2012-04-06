@@ -113,10 +113,14 @@
 
 (defn normalize
   "Normalize s for use as a key in our track db indexes.  Lowercase everything,
-  clean up spacing, etc.  Ghetto tokenizing, effectively."
+  clean up spacing, squash various noise chars."
   [^String s]
   (when s
-    (-> s (.toLowerCase) (.trim) (str/replace #"\s+" " "))))
+    (-> s (.toLowerCase)
+      (str/replace #"['\"-().]" "")
+      (str/replace #"\bthe\b" "")
+      (str/replace #"\s+" " ")
+      (.trim))))
 
 (defn artist-keys
   "Returns a seq of keys under which tracks from the given artist should be
@@ -156,11 +160,16 @@
 
 (defn best-match
   "When a bunch of FsTrack objects seem to match a LovedTrack, this function
-  picks the best one.  Total BS right now: just prefers the oldest track."
+  picks the best one.  Can return nil if all the candidates are crappy."
   [loved-track fs-tracks]
   (->> fs-tracks 
-    (sort-by #(Integer/valueOf (-> (or (:year %) "9999") (subs 0 4))) ; default to 9999, only look at first 4 chars
-             <) ; oldest to newest, no year -> sort last
+    (filter #(->> [% loved-track] ; Drop fs tracks where artist name doesn't match loved track's artist
+               (map :artist-name)
+               (map normalize)
+               (apply =)))
+    (sort-by 
+      #(Integer/valueOf (-> (or (:year %) "1000") (subs 0 4))) ; default to year 1000; only look at first 4 chars
+      >) ; most recent first
     (first)))
 
 (defn print-misses 
@@ -195,12 +204,13 @@
       (println banner)
       (System/exit 1))
 
-    ; Hey look, it actually matches stuff now.  Really basic matcher just to
-    ; see it working.
+    ; Find matches just by track name, then hand-off to 'best-match' to select
+    ; which of the matches (if any) should win.  If no match is found, record
+    ; it our "misses" list.
     (doseq [t loved-tracks]
       (let [matches (get-in track-db [:by-track-name (normalize (:track-name t))])]
-        (if matches
-          (pr-m3u-line (best-match t matches))
+        (if-let [best (best-match t matches)]
+          (pr-m3u-line best)
           (swap! misses conj t))))
 
     (when-not (:quiet opts)

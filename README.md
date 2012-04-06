@@ -30,6 +30,8 @@ Loved tracks for a last.fm user are cached indefinitely in `.<last.fm username>_
 
 Loved tracks are cached forever for a user.  Delete the `.$username_loved_tracks` file to clear the cache.  It's also easy to get a half-baked cache on disk if you ctrl-c part way through downloading from last.fm.  Again, delete the cached file to "fix" this.
 
+Accented characters don't yet match their non-accented counterparts.  e.g. "Dial-a-Cliche" won't match "Dial-a-Cliché".
+
 ## License
 
 Copyright (C) 2012 Mark Feeney
