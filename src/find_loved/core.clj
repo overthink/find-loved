@@ -15,6 +15,7 @@
 ; Some constants
 (def LIMIT 50)
 (def LOVED_URL "http://ws.audioscrobbler.com/2.0/?method=user.getlovedtracks&user=%s&api_key=%s&page=%d&limit=%d")
+(def CUR_YEAR (-> (java.util.GregorianCalendar.) (.get (java.util.Calendar/YEAR))))
 
 (defn get-api-key
   "Returns the last.fm API key found in ~/.lastfm_api_key, or nil if that can't
@@ -117,7 +118,8 @@
   [^String s]
   (when s
     (-> s (.toLowerCase)
-      (str/replace #"['\"-().]" "")
+      (str/replace #"[/-]" " ")
+      (str/replace #"['\"().]" "")
       (str/replace #"\bthe\b" "")
       (str/replace #"\s+" " ")
       (.trim))))
@@ -158,6 +160,25 @@
   [t]
   (println (:path t)))
 
+;(def t1 (FsTrack. "foos" nil "some title" nil "studio album" "1977" "/asdf"))
+;(def t2 (FsTrack. "foos" nil "some title" nil "2000-02-23 Live in Hell" "2000" "/asdf"))
+
+(defn score-fs-track 
+  "Scoring function used to sort candidate FsTracks."
+  [t]
+  ; if-let needed when accessing the FsTrack record since sometimes the stored
+  ; value for a key is nil, so (:foo t "default") doesn't work 
+  (let [year        (if-let [x (:year t)] x "1900") 
+        album-name  (if-let [x (:album-name t)] x "")
+        age         (Integer/valueOf (subs year 0 4))
+        date-title  (re-find #"\d{4}-(\d\d|xx)-(\d\d|xx)" album-name) ; some dates look like "1999-xx-xx"
+        sotd-title  (re-find #"(?i)song of the day" album-name)
+        sotd-factor (if sotd-title 0.75 1.0)  ; penalize 'song of the day' mix albums
+        age-factor  (if date-title 0.5 1.0)]  ; If title contains a date-looking thing, penalize it
+     (* sotd-factor 
+        (/ (* age age-factor) 
+           CUR_YEAR))))
+
 (defn best-match
   "When a bunch of FsTrack objects seem to match a LovedTrack, this function
   picks the best one.  Can return nil if all the candidates are crappy."
@@ -167,9 +188,7 @@
                (map :artist-name)
                (map normalize)
                (apply =)))
-    (sort-by 
-      #(Integer/valueOf (-> (or (:year %) "1000") (subs 0 4))) ; default to year 1000; only look at first 4 chars
-      >) ; most recent first
+    (sort-by score-fs-track >)
     (first)))
 
 (defn print-misses 
