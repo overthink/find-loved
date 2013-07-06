@@ -16,7 +16,8 @@
 ; Some constants
 (def LIMIT 50)
 (def LOVED_URL "http://ws.audioscrobbler.com/2.0/?method=user.getlovedtracks&user=%s&api_key=%s&page=%d&limit=%d")
-(def CUR_YEAR (-> (java.util.GregorianCalendar.) (.get (java.util.Calendar/YEAR))))
+(def CUR_YEAR (-> (java.util.GregorianCalendar.)
+                  (.get (java.util.Calendar/YEAR))))
 
 (defn get-api-key
   "Returns the last.fm API key found in ~/.lastfm_api_key, or nil if that can't
@@ -28,12 +29,24 @@
       (.trim (slurp f)))))
 
 ; A track returned from last.fm's API
-(defrecord LovedTrack [artist-name mb-artist-id track-name mb-track-id date-added])
+(defrecord LovedTrack
+  [artist-name
+   mb-artist-id
+   track-name
+   mb-track-id
+   date-added])
 
 ; A track found in the local file system
-(defrecord FsTrack [artist-name mb-artist-id track-name mb-track-id album-name year path])
+(defrecord FsTrack
+  [artist-name
+   mb-artist-id
+   track-name
+   mb-track-id
+   album-name
+   year
+   path])
 
-(defn- nonempty "Change empty string to nil" 
+(defn- nonempty "Change empty string to nil"
   [s] (if (= "" s) nil s))
 
 (defn mk-loved-track
@@ -58,7 +71,7 @@
     (let [tag (-> (AudioFileIO/read file) (.getTag))
           f (fn [field] (-> (.getFirst tag field) (nonempty)))]
       (when tag
-        (FsTrack. 
+        (FsTrack.
           (f FieldKey/ARTIST)
           (f FieldKey/MUSICBRAINZ_ARTISTID)
           (f FieldKey/TITLE)
@@ -90,9 +103,9 @@
   (with-open [r (java.io.PushbackReader. (io/reader f))]
     ;; set edn reader options so our LovedTrack records are read in correctly
     ;; without using plain old read with *read-eval*==true.
-    (let [reader-opts {:readers {'find_loved.core.LovedTrack
-                                 (partial apply find-loved.core/->LovedTrack)}}]
-      (edn/read reader-opts r))))
+    (let [opts {:readers {'find_loved.core.LovedTrack
+                          (partial apply find-loved.core/->LovedTrack)}}]
+      (edn/read opts r))))
 
 (defn get-tracks
   "Get a lazy seq of user's loved tracks.  HTTP requests are made only as
@@ -102,7 +115,9 @@
    (lazy-seq
      (let [resp (client/get (format LOVED_URL user api-key page LIMIT))
            zipped (zip/xml-zip (str-to-xml (:body resp)))
-           total (Integer/valueOf (xml1-> zipped :lovedtracks (attr :totalPages)))
+           total (Integer/valueOf (xml1-> zipped
+                                          :lovedtracks
+                                          (attr :totalPages)))
            tracks (map mk-loved-track (xml-> zipped :lovedtracks :track))]
        (when (<= page total)
          (concat tracks (get-tracks user api-key (inc page))))))))
@@ -114,7 +129,8 @@
   (let [f (io/as-file (format ".%s_loved_tracks" user))]
     (if (.exists f)
       (deser f)
-      (ser (.getName f) (get-tracks user api-key))))) ; get all the tracks, cache 'em on disk, return 'em
+      ; get all the tracks, cache 'em on disk, return 'em
+      (ser (.getName f) (get-tracks user api-key)))))
 
 (defn normalize
   "Normalize s for use as a key in our track db indexes.  Lowercase everything,
@@ -144,7 +160,7 @@
   (let [upd (fn [db0 idx k] (update-in db0 [idx k] #(conj (set %1) %2) track))
         ; This code is lame: update the by-artist-name index, save the result,
         ; then in that result update the by-track-name index.
-        db1 (reduce #(upd %1 :by-artist-name %2) 
+        db1 (reduce #(upd %1 :by-artist-name %2)
                     db
                     (artist-keys (:artist-name track)))]
       (upd db1 :by-track-name (normalize (:track-name track)))))
@@ -159,7 +175,7 @@
     (doseq [h handlers]
       (.removeHandler root h))))
 
-(defn pr-m3u-line 
+(defn pr-m3u-line
   "Print a m3u-compatible line of text to *out* for the given track."
   [t]
   (println (:path t)))
@@ -167,35 +183,35 @@
 ;(def t1 (FsTrack. "foos" nil "some title" nil "studio album" "1977" "/asdf"))
 ;(def t2 (FsTrack. "foos" nil "some title" nil "2000-02-23 Live in Hell" "2000" "/asdf"))
 
-(defn score-fs-track 
+(defn score-fs-track
   "Scoring function used to sort candidate FsTracks."
   [t]
   ; if-let needed when accessing the FsTrack record since sometimes the stored
-  ; value for a key is nil, so (:foo t "default") doesn't work 
-  (let [year        (if-let [x (:year t)] x "1900") 
+  ; value for a key is nil, so (:foo t "default") doesn't work
+  (let [year        (if-let [x (:year t)] x "1900")
         album-name  (if-let [x (:album-name t)] x "")
         age         (Integer/valueOf (subs year 0 4))
         date-title  (re-find #"\d{4}-(\d\d|xx)-(\d\d|xx)" album-name) ; some dates look like "1999-xx-xx"
         sotd-title  (re-find #"(?i)song of the day" album-name)
         sotd-factor (if sotd-title 0.75 1.0)  ; penalize 'song of the day' mix albums
         age-factor  (if date-title 0.5 1.0)]  ; If title contains a date-looking thing, penalize it
-     (* sotd-factor 
-        (/ (* age age-factor) 
+     (* sotd-factor
+        (/ (* age age-factor)
            CUR_YEAR))))
 
 (defn best-match
   "When a bunch of FsTrack objects seem to match a LovedTrack, this function
   picks the best one.  Can return nil if all the candidates are crappy."
   [loved-track fs-tracks]
-  (->> fs-tracks 
-    (filter #(->> [% loved-track] ; Drop fs tracks where artist name doesn't match loved track's artist
-               (map :artist-name)
-               (map normalize)
-               (apply =)))
+  (->> fs-tracks
+       (filter #(->> [% loved-track] ; Drop fs tracks where artist name doesn't match loved track's artist
+                     (map :artist-name)
+                     (map normalize)
+                     (apply =)))
     (sort-by score-fs-track >)
     (first)))
 
-(defn print-misses 
+(defn print-misses
   "Print info about the loved tracks that we could not match."
   [misses]
   (let [grouped (group-by :artist-name misses)
@@ -205,21 +221,24 @@
         (doseq [t tracks]
           (println (str "  - " (:track-name t)))))))
 
+(defn- parse-cli [args]
+  (cli args
+       ["--api-key" "last.fm API key, if not set users $HOME/.lastfm_api_key"]
+       ["--quiet" "Don't write informative stuff on stderr."]
+       ["-h" "--help" "Show help and exit" :flag true]))
+
 (defn -main [& args]
   (set! *warn-on-reflection* true)
   (disable-jul!)
-  (let [[opts args banner] (cli args
-                                ["--api-key" "last.fm API key, if not set users $HOME/.lastfm_api_key"]
-                                ["--quiet" "Don't write informative stuff on stderr."]
-                                ["-h" "--help" "Show help and exit" :flag true])
+  (let [[opts args banner] (parse-cli args)
         api-key (or (:api-key opts) (get-api-key))
         [user & roots] args
         loved-tracks (get-tracks-cached user api-key)
         fs-tracks (->> roots
-                    (map io/as-file)
-                    (mapcat file-seq)
-                    (map mk-fs-track)
-                    (remove nil?))
+                       (map io/as-file)
+                       (mapcat file-seq)
+                       (map mk-fs-track)
+                       (remove nil?))
         track-db (reduce add-track {} fs-tracks)
         misses (atom [])]
     (when (:help opts)
