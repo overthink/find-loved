@@ -6,6 +6,7 @@
             [clojure.string :as str]
             [clojure.xml :as xml]
             [clojure.zip :as zip]
+            [clojure.edn :as edn]
             [clojure.java.io :as io])
   (:import [java.util.logging Logger]
            [org.jaudiotagger.audio AudioFileIO AudioFileFilter]
@@ -87,8 +88,11 @@
   that can be coerced into a File."
   [f]
   (with-open [r (java.io.PushbackReader. (io/reader f))]
-    (binding [*read-eval* false]  ; don't allow eval reader macro '#='
-      (read r))))
+    ;; set edn reader options so our LovedTrack records are read in correctly
+    ;; without using plain old read with *read-eval*==true.
+    (let [reader-opts {:readers {'find_loved.core.LovedTrack
+                                 (partial apply find-loved.core/->LovedTrack)}}]
+      (edn/read reader-opts r))))
 
 (defn get-tracks
   "Get a lazy seq of user's loved tracks.  HTTP requests are made only as
