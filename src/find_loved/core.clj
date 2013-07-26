@@ -1,29 +1,29 @@
 (ns ^{:author "Mark Feeney"}
   find-loved.core
-  (:use [clojure.tools.cli :only (cli)]
-        [clojure.data.zip.xml :only (attr text xml-> xml1->)])
-  (:require [clj-http.client :as client]
-            [clojure.string :as str]
-            [clojure.xml :as xml]
-            [clojure.zip :as zip]
-            [clojure.edn :as edn]
-            [clojure.java.io :as io])
-  (:import [java.util.logging Logger]
-           [org.jaudiotagger.audio AudioFileIO AudioFileFilter]
-           [org.jaudiotagger.tag FieldKey])
-  (:gen-class))
+  (:require
+    [clojure.tools.cli :refer [cli]]
+    [clojure.data.zip.xml :refer [attr text xml-> xml1->]]
+    [clj-http.client :as client]
+    [clojure.string :as str]
+    [clojure.xml :as xml]
+    [clojure.zip :as zip]
+    [clojure.edn :as edn]
+    [clojure.java.io :as io])
+  (:import
+    [java.util Calendar GregorianCalendar]
+    [java.util.logging Logger]
+    [org.jaudiotagger.audio AudioFileIO AudioFileFilter]
+    [org.jaudiotagger.tag FieldKey]))
 
-; Some constants
 (def LIMIT 50)
 (def LOVED_URL "http://ws.audioscrobbler.com/2.0/?method=user.getlovedtracks&user=%s&api_key=%s&page=%d&limit=%d")
-(def CUR_YEAR (-> (java.util.GregorianCalendar.)
-                  (.get (java.util.Calendar/YEAR))))
+(def CUR_YEAR (. (GregorianCalendar.) get (Calendar/YEAR)))
 
 (defn get-api-key
   "Returns the last.fm API key found in ~/.lastfm_api_key, or nil if that can't
   be found."
   []
-  (let [home (-> (System/getenv) (get "HOME" "."))
+  (let [home (get (System/getenv) "HOME" ".")
         f    (io/as-file (format "%s/.lastfm_api_key" home))]
     (when (.exists f)
       (.trim (slurp f)))))
@@ -49,10 +49,16 @@
 (defn- nonempty "Change empty string to nil"
   [s] (if (= "" s) nil s))
 
+(defn blank->nil
+  "Change empty strings into nil."
+  [s]
+  (if (not (str/blank? s)) s))
+
 (defn mk-loved-track
   "Turn the given Clojure XML zipper into a LovedTrack record."
   [z]
-  (let [getval (fn [& preds] (-> (apply xml1-> z preds) (nonempty)))]
+  (let [getval (fn [& preds] (-> (apply xml1-> z preds)
+                                 (blank->nil)))]
     (LovedTrack.
       (getval :artist :name text)
       (getval :artist :mbid text)
@@ -68,8 +74,8 @@
   FsTrack if possible, or nil if we couldn't read meta-data from the file."
   [file]
   (when (.accept audio-file-filter file)
-    (let [tag (-> (AudioFileIO/read file) (.getTag))
-          f (fn [field] (-> (.getFirst tag field) (nonempty)))]
+    (let [tag (.getTag (AudioFileIO/read file))
+          f (fn [field] (blank->nil (.getFirst tag field)))]
       (when tag
         (FsTrack.
           (f FieldKey/ARTIST)
@@ -80,7 +86,7 @@
           (f FieldKey/YEAR)
           (.getAbsolutePath file))))))
 
-(defn str-to-xml
+(defn str->xml
   "Parse given string into Clojure's tag/attrs/content format."
   [s]
   (with-open [xml-in (io/input-stream (.getBytes s "UTF-8"))]
@@ -114,7 +120,7 @@
   ([user api-key page]
    (lazy-seq
      (let [resp (client/get (format LOVED_URL user api-key page LIMIT))
-           zipped (zip/xml-zip (str-to-xml (:body resp)))
+           zipped (zip/xml-zip (str->xml (:body resp)))
            total (Integer/valueOf (xml1-> zipped
                                           :lovedtracks
                                           (attr :totalPages)))
@@ -138,11 +144,11 @@
   [^String s]
   (when s
     (-> s (.toLowerCase)
-      (str/replace #"[/-]" " ")
-      (str/replace #"['\"().]" "")
-      (str/replace #"\bthe\b" "")
-      (str/replace #"\s+" " ")
-      (.trim))))
+        (str/replace #"[/-]" " ")
+        (str/replace #"['\"().]" "")
+        (str/replace #"\bthe\b" "")
+        (str/replace #"\s+" " ")
+        (.trim))))
 
 (defn artist-keys
   "Returns a seq of keys under which tracks from the given artist should be
