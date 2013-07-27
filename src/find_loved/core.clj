@@ -10,11 +10,13 @@
     [clojure.edn :as edn]
     [clojure.java.io :as io])
   (:import
+    [java.io File]
     [java.util Calendar GregorianCalendar]
     [java.util.logging Logger]
-    [org.jaudiotagger.audio AudioFileIO AudioFileFilter]
+    [org.jaudiotagger.audio AudioFile AudioFileIO AudioFileFilter]
     [org.jaudiotagger.tag FieldKey]))
 
+(set! *warn-on-reflection* true)
 (def LIMIT 50)
 (def LOVED_URL "http://ws.audioscrobbler.com/2.0/?method=user.getlovedtracks&user=%s&api_key=%s&page=%d&limit=%d")
 (def CUR_YEAR (. (GregorianCalendar.) get (Calendar/YEAR)))
@@ -26,7 +28,7 @@
   (let [home (get (System/getenv) "HOME" ".")
         f    (io/as-file (format "%s/.lastfm_api_key" home))]
     (when (.exists f)
-      (.trim (slurp f)))))
+      (str/trim (slurp f)))))
 
 ; A track returned from last.fm's API
 (defrecord LovedTrack
@@ -66,16 +68,13 @@
       (getval :mbid text) ; musicbrainz track id
       (getval :date (attr :uts)))))
 
-; We only need one of these filters, so make it a 'global' in the namespace.
-(def audio-file-filter (AudioFileFilter. false))
-
 (defn mk-fs-track
   "Make a track record for a music file on the local filesystem.  Returns a
   FsTrack if possible, or nil if we couldn't read meta-data from the file."
-  [file]
-  (when (.accept audio-file-filter file)
+  [^File file]
+  (when (.accept (AudioFileFilter. false) file)
     (let [tag (.getTag (AudioFileIO/read file))
-          f (fn [field] (blank->nil (.getFirst tag field)))]
+          f (fn [^FieldKey field] (blank->nil (.getFirst tag field)))]
       (when tag
         (FsTrack.
           (f FieldKey/ARTIST)
@@ -88,7 +87,7 @@
 
 (defn str->xml
   "Parse given string into Clojure's tag/attrs/content format."
-  [s]
+  [^String s]
   (with-open [xml-in (io/input-stream (.getBytes s "UTF-8"))]
     (xml/parse xml-in)))
 
@@ -121,9 +120,9 @@
    (lazy-seq
      (let [resp (client/get (format LOVED_URL user api-key page LIMIT))
            zipped (zip/xml-zip (str->xml (:body resp)))
-           total (Integer/valueOf (xml1-> zipped
-                                          :lovedtracks
-                                          (attr :totalPages)))
+           total (Integer/parseInt (xml1-> zipped
+                                           :lovedtracks
+                                           (attr :totalPages)))
            tracks (map mk-loved-track (xml-> zipped :lovedtracks :track))]
        (when (<= page total)
          (concat tracks (get-tracks user api-key (inc page))))))))
@@ -141,23 +140,25 @@
 (defn normalize
   "Normalize s for use as a key in our track db indexes.  Lowercase everything,
   clean up spacing, squash various noise chars."
-  [^String s]
+  [s]
   (when s
-    (-> s (.toLowerCase)
+    (-> s
+        (str/lower-case)
         (str/replace #"[/-]" " ")
         (str/replace #"['\"().]" "")
         (str/replace #"\bthe\b" "")
         (str/replace #"\s+" " ")
-        (.trim))))
+        (str/trim))))
 
 (defn artist-keys
   "Returns a seq of keys under which tracks from the given artist should be
   stored.  e.g. 'The Decemberists' should be stored under 'the decemberists',
   and 'decemberists'."
   [artist]
-  (let [nrm (normalize artist)]
-    (if (and nrm (.startsWith nrm "the "))
-      [nrm (str/replace nrm #"^the " "")]
+  (let [nrm (normalize artist)
+        leading-the #"^the "]
+    (if (and nrm (re-find leading-the nrm))
+      [nrm (str/replace nrm leading-the "")]
       [nrm])))
 
 (defn add-track
@@ -234,7 +235,6 @@
        ["-h" "--help" "Show help and exit" :flag true]))
 
 (defn -main [& args]
-  (set! *warn-on-reflection* true)
   (disable-jul!)
   (let [[opts args banner] (parse-cli args)
         api-key (or (:api-key opts) (get-api-key))
