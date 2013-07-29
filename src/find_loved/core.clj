@@ -164,7 +164,10 @@
 (defn add-track
   "Add an FsTrack to the given track db.  Return the new db."
   [db track]
-  (let [upd (fn [db0 idx k] (update-in db0 [idx k] #(conj (set %1) %2) track))
+  (let [upd (fn [db0 idx k]
+              (update-in db0
+                         [idx k]
+                         #(conj (set %1) %2) track))
         ; This code is lame: update the by-artist-name index, save the result,
         ; then in that result update the by-track-name index.
         db1 (reduce #(upd %1 :by-artist-name %2)
@@ -187,11 +190,9 @@
   [t]
   (println (:path t)))
 
-;(def t1 (FsTrack. "foos" nil "some title" nil "studio album" "1977" "/asdf"))
-;(def t2 (FsTrack. "foos" nil "some title" nil "2000-02-23 Live in Hell" "2000" "/asdf"))
-
 (defn score-fs-track
-  "Scoring function used to sort candidate FsTracks."
+  "Scoring function for candidate FsTracks. This is where I put ugly heuristics
+  like 'penalize tracks named like x'. Should one day be made pluggable."
   [t]
   ; if-let needed when accessing the FsTrack record since sometimes the stored
   ; value for a key is nil, so (:foo t "default") doesn't work
@@ -271,3 +272,15 @@
         (println (format "%d loved tracks" (count loved-tracks)))
         (println (format "%d fs tracks" (count fs-tracks)))))))
 
+(comment
+
+  (def t1 (FsTrack. "The Fluffheads" nil "Awesome Song" nil "studio album" "1977" "/asdf"))
+  (def t2 (FsTrack. "The Fluffheads" nil "Awesome Song" nil "2000-02-23 Live in Hell" "2000" "/asdf"))
+  (score-fs-track t1)
+  (score-fs-track t2)
+  (let [db0 {}
+        db1 (add-track db0 t1)
+        db2 (add-track db1 t2)]
+    (pprint db2))
+
+)
