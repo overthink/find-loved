@@ -231,7 +231,7 @@
 (defn- parse-cli [args]
   (cli args
        ["--api-key" "last.fm API key, if not set users $HOME/.lastfm_api_key"]
-       ["--quiet" "Don't write informative stuff on stderr."]
+       ["--quiet" "Don't write informative stuff on stderr." :flag true]
        ["-h" "--help" "Show help and exit" :flag true]))
 
 (defn -main [& args]
@@ -273,11 +273,16 @@
 
 (comment
 
+  (let [args ["--quiet" "--api-key" "12345" "/home/mark/music" "/data/other/music" ]
+        [opts dirs _] (parse-cli args)]
+    [opts dirs])
+
   (def t1 (FsTrack. "The Fluffheads" nil "Awesome Song" nil "studio album" "1977" "/asdf"))
   (def t2 (FsTrack. "The Fluffheads" nil "Awesome Song" nil "2000-02-23 Live in Hell" "2000" "/asdf"))
+
   (score-fs-track t1)
   (score-fs-track t2)
-  
+
   (def db (-> {}
               (add-track t1)
               (add-track t2)))
