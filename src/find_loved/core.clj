@@ -146,7 +146,6 @@
         (str/lower-case)
         (str/replace #"[/-]" " ")
         (str/replace #"['\"().]" "")
-        (str/replace #"\bthe\b" "")
         (str/replace #"\s+" " ")
         (str/trim))))
 
@@ -158,7 +157,7 @@
   (let [nrm (normalize artist)
         leading-the #"^the "]
     (if (and nrm (re-find leading-the nrm))
-      [nrm (str/replace nrm leading-the "")]
+      [nrm (str/replace nrm leading-the "")] ; e.g. ['the band', 'band']
       [nrm])))
 
 (defn add-track
@@ -278,9 +277,13 @@
   (def t2 (FsTrack. "The Fluffheads" nil "Awesome Song" nil "2000-02-23 Live in Hell" "2000" "/asdf"))
   (score-fs-track t1)
   (score-fs-track t2)
-  (let [db0 {}
-        db1 (add-track db0 t1)
-        db2 (add-track db1 t2)]
-    (pprint db2))
+  
+  (def db (-> {}
+              (add-track t1)
+              (add-track t2)))
+  (pprint db)
+  (artist-keys "The Fluffheads")
+  (artist-keys "Opeth")
 
 )
+
