@@ -30,7 +30,7 @@
     (when (.exists f)
       (str/trim (slurp f)))))
 
-; A track returned from last.fm's API
+;; A track returned from last.fm's API
 (defrecord LovedTrack
   [artist-name
    mb-artist-id
@@ -38,7 +38,7 @@
    mb-track-id
    date-added])
 
-; A track found in the local file system
+;; A track found in the local file system
 (defrecord FsTrack
   [artist-name
    mb-artist-id
@@ -134,7 +134,7 @@
   (let [f (io/as-file (format ".%s_loved_tracks" user))]
     (if (.exists f)
       (deser f)
-      ; get all the tracks, cache 'em on disk, return 'em
+      ;; get all the tracks, cache 'em on disk, return 'em
       (ser (.getName f) (get-tracks user api-key)))))
 
 (defn normalize
@@ -167,8 +167,8 @@
               (update-in db0
                          [idx k]
                          #(conj (set %1) %2) track))
-        ; This code is lame: update the by-artist-name index, save the result,
-        ; then in that result update the by-track-name index.
+        ;; This code is lame: update the by-artist-name index, save the result,
+        ;; then in that result update the by-track-name index.
         db1 (reduce #(upd %1 :by-artist-name %2)
                     db
                     (artist-keys (:artist-name track)))]
@@ -193,8 +193,8 @@
   "Scoring function for candidate FsTracks. This is where I put ugly heuristics
   like 'penalize tracks named like x'. Should one day be made pluggable."
   [t]
-  ; if-let needed when accessing the FsTrack record since sometimes the stored
-  ; value for a key is nil, so (:foo t "default") doesn't work
+  ;; if-let needed when accessing the FsTrack record since sometimes the stored
+  ;; value for a key is nil, so (:foo t "default") doesn't work
   (let [year        (if-let [x (:year t)] x "1900")
         album-name  (if-let [x (:album-name t)] x "")
         age         (Integer/valueOf (subs year 0 4))
@@ -220,13 +220,16 @@
 
 (defn print-misses
   "Print info about the loved tracks that we could not match."
-  [misses]
-  (let [grouped (group-by :artist-name misses)
-        sorted (sort-by #(* -1 (count (second %))) grouped)] ; show artists with most missing tracks first
-    (doseq [[artist tracks] sorted]
+  [coll]
+  (let [grouped (->> coll
+                     (filter :artist-name) ; elems must have track and artist names to be printed
+                     (filter :track-name)
+                     (group-by :artist-name)
+                     (sort-by #(* -1 (count (second %)))))] ; show artists with most missing tracks first
+    (doseq [[artist tracks] grouped]
       (println (str artist ":"))
-        (doseq [t tracks]
-          (println (str "  - " (:track-name t)))))))
+      (doseq [t tracks]
+        (println (str "  - " (:track-name t)))))))
 
 (defn- parse-cli [args]
   (cli args
@@ -247,14 +250,15 @@
                        (remove nil?))
         track-db (reduce add-track {} fs-tracks)
         misses (atom [])]
+
     (when (:help opts)
       (println "find-loved LASTFM-USERNAME SEARCH_DIR0 [SEARCH_DIR1 [..]]")
       (println banner)
       (System/exit 1))
 
-    ; Find matches just by track name, then hand-off to 'best-match' to select
-    ; which of the matches (if any) should win.  If no match is found, record
-    ; it our "misses" list.
+    ;; Find matches just by track name, then hand-off to 'best-match' to select
+    ;; which of the matches (if any) should win.  If no match is found, record
+    ;; it our "misses" list.
     (doseq [t loved-tracks]
       (let [matches (get-in track-db [:by-track-name (normalize (:track-name t))])]
         (if-let [best (best-match t matches)]
@@ -263,13 +267,15 @@
 
     (when-not (:quiet opts)
       (binding [*out* *err*]
-        (print-misses @misses)
-        (println)
-        (println (format "%d missing loved tracks" (count @misses)))
-        (println (format "%d unique track names in db" (count (get-in track-db [:by-track-name]))))
-        (println (format "%d artist name variations in db" (count (get-in track-db [:by-artist-name]))))
-        (println (format "%d loved tracks" (count loved-tracks)))
-        (println (format "%d fs tracks" (count fs-tracks)))))))
+        (let [ms @misses
+              p (fn [& more] (println (apply format more)))]
+          (print-misses ms)
+          (p "")
+          (p "%d missing loved tracks" (count ms))
+          (p "%d unique track names in db" (count (get-in track-db [:by-track-name])))
+          (p "%d artist name variations in db" (count (get-in track-db [:by-artist-name])))
+          (p "%d loved tracks" (count loved-tracks))
+          (p "%d fs tracks" (count fs-tracks)))))))
 
 (comment
 
@@ -289,6 +295,13 @@
   (pprint db)
   (artist-keys "The Fluffheads")
   (artist-keys "Opeth")
+
+  (print-misses [1 2 3 4]) ; garbage, should print nothing
+  (print-misses [{:artist-name "foo" :track-name "bar"}
+                 3 4 9000
+                 {:artist-name "aculy" :track-name "is dolan"}
+                 42
+                 {:artist-name "foo" :track-name "baz"}])
 
 )
 
