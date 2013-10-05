@@ -1,6 +1,7 @@
 (ns ^{:author "Mark Feeney"}
   find-loved.core
   (:require
+    [clojure.core.typed :refer [ann cf check-ns Option Seqable] :as t]
     [clojure.tools.cli :refer [cli]]
     [clojure.data.zip.xml :refer [attr text xml-> xml1->]]
     [clj-http.client :as client]
@@ -17,10 +18,37 @@
     [org.jaudiotagger.tag FieldKey]))
 
 (set! *warn-on-reflection* true)
+
+(ann ^:no-check clojure.xml/parse [Any -> Any])
+(ann ^:no-check clojure.string/blank? [Any -> Any])
+(ann ^:no-check clojure.string/lowercase [Any -> Any])
+(ann ^:no-check clojure.string/replace [Any -> Any])
+(ann ^:no-check clojure.string/trim [Any -> Any])
+(ann ^:no-check clojure.java.io/writer [Any -> Any])
+(ann ^:no-check clojure.java.io/as-file [Any -> Any])
+(ann ^:no-check clojure.java.io/input-stream [Any -> Any])
+(ann ^:no-check clojure.zip/xml-zip [Any -> Any])
+(ann ^:no-check clojure.data.zip.xml/attr [Any -> Any])
+(ann ^:no-check clojure.data.zip.xml/text [Any -> Any])
+(ann ^:no-check clojure.data.zip.xml/xml-> [Any Any * -> Any])
+(ann ^:no-check clojure.data.zip.xml/xml1-> [Any Any * -> Any])
+(ann ^:no-check clj-http.client/get [Any -> Any])
+(ann ^:no-check clojure.core/update-in [Any -> Any])
+(ann ^:no-check clojure.core/get-in [Any -> Any])
+(ann ^:no-check clojure.core/sort-by [Any -> Any])
+(ann ^:no-check clojure.core/group-by [Any -> Any])
+(ann ^:no-check clojure.core/file-seq [Any -> Any])
+
+(ann LIMIT Number)
 (def LIMIT 50)
+
+(ann LOVED_URL String)
 (def LOVED_URL "http://ws.audioscrobbler.com/2.0/?method=user.getlovedtracks&user=%s&api_key=%s&page=%d&limit=%d")
+
+(ann CUR_YEAR Number)
 (def CUR_YEAR (. (GregorianCalendar.) get (Calendar/YEAR)))
 
+(ann ^:no-check get-api-key [-> (Option String)])
 (defn get-api-key
   "Returns the last.fm API key found in ~/.lastfm_api_key, or nil if that can't
   be found."
@@ -31,6 +59,11 @@
       (str/trim (slurp f)))))
 
 ;; A track returned from last.fm's API
+(t/ann-record LovedTrack [artist-name :- (Option String)
+                          mb-artist-id :- (Option String)
+                          track-name :- (Option String)
+                          mb-track-id :- (Option String)
+                          date-added :- (Option String)])
 (defrecord LovedTrack
   [artist-name
    mb-artist-id
@@ -39,6 +72,14 @@
    date-added])
 
 ;; A track found in the local file system
+(t/ann-record FsTrack [artist-name :- (Option String)
+                       mb-artist-id :- (Option String)
+                       track-name :- (Option String)
+                       mb-track-id :- (Option String)
+                       album-name :- (Option String)
+                       year :- (Option String)
+                       path :- (Option String)])
+
 (defrecord FsTrack
   [artist-name
    mb-artist-id
@@ -48,14 +89,17 @@
    year
    path])
 
+(ann nonempty [String -> (Option String)])
 (defn- nonempty "Change empty string to nil"
   [s] (if (= "" s) nil s))
 
+(ann blank->nil [String -> (Option String)])
 (defn blank->nil
   "Change empty strings into nil."
   [s]
   (if (not (str/blank? s)) s))
 
+(ann ^:no-check mk-loved-track [Any -> LovedTrack])
 (defn mk-loved-track
   "Turn the given Clojure XML zipper into a LovedTrack record."
   [z]
@@ -68,6 +112,7 @@
       (getval :mbid text) ; musicbrainz track id
       (getval :date (attr :uts)))))
 
+(ann mk-fs-track [File -> (Option FsTrack)])
 (defn mk-fs-track
   "Make a track record for a music file on the local filesystem.  Returns a
   FsTrack if possible, or nil if we couldn't read meta-data from the file."
@@ -85,12 +130,15 @@
           (f FieldKey/YEAR)
           (.getAbsolutePath file))))))
 
+(ann str->xml [String -> Any])
 (defn str->xml
   "Parse given string into Clojure's tag/attrs/content format."
   [^String s]
-  (with-open [xml-in (io/input-stream (.getBytes s "UTF-8"))]
+  (with-open [^java.io.InputStream xml-in (io/input-stream (.getBytes s "UTF-8"))]
     (xml/parse xml-in)))
 
+(ann clojure.core/*print-dup* boolean)
+(ann ^:no-check ser [Any -> Any])
 (defn ser
   "Write obj to filename in a way that Clojure's reader can read it back in.
   Returns obj."
@@ -101,6 +149,7 @@
       (prn obj)))
   obj)
 
+(ann ^:no-check deser [Any -> Any])
 (defn deser
   "Reads a single Clojure data structure from f and returns it. f is anything
   that can be coerced into a File."
@@ -112,6 +161,8 @@
                           (partial apply find-loved.core/->LovedTrack)}}]
       (edn/read opts r))))
 
+(ann get-tracks (Fn [String String -> (Seqable LovedTrack)]
+                    [String String Number -> (Seqable LovedTrack)]))
 (defn get-tracks
   "Get a lazy seq of user's loved tracks.  HTTP requests are made only as
   necessary as the list is consumed."
@@ -127,6 +178,7 @@
        (when (<= page total)
          (concat tracks (get-tracks user api-key (inc page))))))))
 
+(ann get-tracks-cached [String String -> (Seqable LovedTrack)])
 (defn get-tracks-cached
   "If we have a cached copy of the loved tracks on disk, use them, otherwise
   forward call to get-tracks."
@@ -137,6 +189,7 @@
       ;; get all the tracks, cache 'em on disk, return 'em
       (ser (.getName f) (get-tracks user api-key)))))
 
+(ann normalize [(Option String) -> (Option String)])
 (defn normalize
   "Normalize s for use as a key in our track db indexes.  Lowercase everything,
   clean up spacing, squash various noise chars."
@@ -149,6 +202,7 @@
         (str/replace #"\s+" " ")
         (str/trim))))
 
+(ann artist-keys [(Option String) -> (Seqable String)])
 (defn artist-keys
   "Returns a seq of keys under which tracks from the given artist should be
   stored.  e.g. 'The Decemberists' should be stored under 'the decemberists',
@@ -160,6 +214,7 @@
       [nrm (str/replace nrm leading-the "")] ; e.g. ['the band', 'band']
       [nrm])))
 
+(ann add-track [clojure.lang.IPersistentMap FsTrack -> clojure.lang.IPersistentMap])
 (defn add-track
   "Add an FsTrack to the given track db.  Return the new db."
   [db track]
@@ -174,6 +229,7 @@
                     (artist-keys (:artist-name track)))]
       (upd db1 :by-track-name (normalize (:track-name track)))))
 
+(ann disable-jul! [-> nil])
 (defn disable-jul!
   "Just turn off java.util.logging outright by removing all the handlers on the
   root logger. jaudiotagger spams tons of INFO logs by default, and there
@@ -184,11 +240,13 @@
     (doseq [h handlers]
       (.removeHandler root h))))
 
+(ann pr-m3u-line [FsTrack -> nil])
 (defn pr-m3u-line
   "Print a m3u-compatible line of text to *out* for the given track."
   [t]
   (println (:path t)))
 
+(ann score-fs-track [FsTrack -> Number])
 (defn score-fs-track
   "Scoring function for candidate FsTracks. This is where I put ugly heuristics
   like 'penalize tracks named like x'. Should one day be made pluggable."
@@ -206,6 +264,7 @@
         (/ (* age age-factor)
            CUR_YEAR))))
 
+(ann best-match [LovedTrack (Seqable FsTrack) -> FsTrack])
 (defn best-match
   "When a bunch of FsTrack objects seem to match a LovedTrack, this function
   picks the best one.  Can return nil if all the candidates are crappy."
@@ -218,6 +277,7 @@
     (sort-by score-fs-track >)
     (first)))
 
+(ann print-misses [(Seqable LovedTrack) -> nil])
 (defn print-misses
   "Print info about the loved tracks that we could not match."
   [coll]
@@ -231,12 +291,14 @@
       (doseq [t tracks]
         (println (str "  - " (:track-name t)))))))
 
+(ann ^:no-check parse-cli [(t/Vec String) -> Any])
 (defn- parse-cli [args]
   (cli args
        ["--api-key" "last.fm API key, if not set users $HOME/.lastfm_api_key"]
        ["--quiet" "Don't write informative stuff on stderr." :flag true]
        ["-h" "--help" "Show help and exit" :flag true]))
 
+(ann -main [(t/Vec String) -> nil])
 (defn -main [& args]
   (disable-jul!)
   (let [[opts args banner] (parse-cli args)
