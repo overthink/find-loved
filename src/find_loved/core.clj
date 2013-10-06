@@ -21,7 +21,7 @@
 
 (ann ^:no-check clojure.xml/parse [Any -> Any])
 (ann ^:no-check clojure.string/blank? [Any -> Any])
-(ann ^:no-check clojure.string/lowercase [Any -> Any])
+(ann ^:no-check clojure.string/lower-case [Any -> Any])
 (ann ^:no-check clojure.string/replace [Any -> Any])
 (ann ^:no-check clojure.string/trim [Any -> Any])
 (ann ^:no-check clojure.java.io/writer [Any -> Any])
@@ -38,6 +38,8 @@
 (ann ^:no-check clojure.core/sort-by [Any -> Any])
 (ann ^:no-check clojure.core/group-by [Any -> Any])
 (ann ^:no-check clojure.core/file-seq [Any -> Any])
+
+(t/non-nil-return java.lang.Integer/valueOf :all)
 
 (ann LIMIT Number)
 (def LIMIT 50)
@@ -89,15 +91,11 @@
    year
    path])
 
-(ann nonempty [String -> (Option String)])
-(defn- nonempty "Change empty string to nil"
-  [s] (if (= "" s) nil s))
-
-(ann blank->nil [String -> (Option String)])
+(ann blank->nil [(Option String) -> (Option String)])
 (defn blank->nil
   "Change empty strings into nil."
   [s]
-  (if (not (str/blank? s)) s))
+  (when (not (str/blank? s)) s))
 
 (ann ^:no-check mk-loved-track [Any -> LovedTrack])
 (defn mk-loved-track
@@ -118,19 +116,19 @@
   FsTrack if possible, or nil if we couldn't read meta-data from the file."
   [^File file]
   (when (.accept (AudioFileFilter. false) file)
-    (let [tag (.getTag (AudioFileIO/read file))
-          f (fn [^FieldKey field] (blank->nil (.getFirst tag field)))]
-      (when tag
-        (FsTrack.
-          (f FieldKey/ARTIST)
-          (f FieldKey/MUSICBRAINZ_ARTISTID)
-          (f FieldKey/TITLE)
-          (f FieldKey/MUSICBRAINZ_TRACK_ID)
-          (f FieldKey/ALBUM)
-          (f FieldKey/YEAR)
-          (.getAbsolutePath file))))))
+    (if-let [af (AudioFileIO/read file)]
+      (if-let [tag (.getTag af)]
+        (let [f (t/fn> [^FieldKey field :- FieldKey] (blank->nil (.getFirst tag field)))]
+          (FsTrack.
+            (f FieldKey/ARTIST)
+            (f FieldKey/MUSICBRAINZ_ARTISTID)
+            (f FieldKey/TITLE)
+            (f FieldKey/MUSICBRAINZ_TRACK_ID)
+            (f FieldKey/ALBUM)
+            (f FieldKey/YEAR)
+            (.getAbsolutePath file)))))))
 
-(ann str->xml [String -> Any])
+(ann ^:no-check str->xml [String -> Any])
 (defn str->xml
   "Parse given string into Clojure's tag/attrs/content format."
   [^String s]
@@ -161,7 +159,7 @@
                           (partial apply find-loved.core/->LovedTrack)}}]
       (edn/read opts r))))
 
-(ann get-tracks (Fn [String String -> (Seqable LovedTrack)]
+(ann ^:no-check get-tracks (Fn [String String -> (Seqable LovedTrack)]
                     [String String Number -> (Seqable LovedTrack)]))
 (defn get-tracks
   "Get a lazy seq of user's loved tracks.  HTTP requests are made only as
@@ -178,7 +176,7 @@
        (when (<= page total)
          (concat tracks (get-tracks user api-key (inc page))))))))
 
-(ann get-tracks-cached [String String -> (Seqable LovedTrack)])
+(ann ^:no-check get-tracks-cached [String String -> (Seqable LovedTrack)])
 (defn get-tracks-cached
   "If we have a cached copy of the loved tracks on disk, use them, otherwise
   forward call to get-tracks."
@@ -189,7 +187,7 @@
       ;; get all the tracks, cache 'em on disk, return 'em
       (ser (.getName f) (get-tracks user api-key)))))
 
-(ann normalize [(Option String) -> (Option String)])
+(ann ^:no-check normalize [(Option String) -> (Option String)])
 (defn normalize
   "Normalize s for use as a key in our track db indexes.  Lowercase everything,
   clean up spacing, squash various noise chars."
@@ -202,7 +200,7 @@
         (str/replace #"\s+" " ")
         (str/trim))))
 
-(ann artist-keys [(Option String) -> (Seqable String)])
+(ann ^:no-check artist-keys [(Option String) -> (Seqable String)])
 (defn artist-keys
   "Returns a seq of keys under which tracks from the given artist should be
   stored.  e.g. 'The Decemberists' should be stored under 'the decemberists',
@@ -214,7 +212,7 @@
       [nrm (str/replace nrm leading-the "")] ; e.g. ['the band', 'band']
       [nrm])))
 
-(ann add-track [clojure.lang.IPersistentMap FsTrack -> clojure.lang.IPersistentMap])
+(ann ^:no-check add-track [clojure.lang.IPersistentMap FsTrack -> clojure.lang.IPersistentMap])
 (defn add-track
   "Add an FsTrack to the given track db.  Return the new db."
   [db track]
@@ -229,7 +227,7 @@
                     (artist-keys (:artist-name track)))]
       (upd db1 :by-track-name (normalize (:track-name track)))))
 
-(ann disable-jul! [-> nil])
+(ann ^:no-check disable-jul! [-> nil])
 (defn disable-jul!
   "Just turn off java.util.logging outright by removing all the handlers on the
   root logger. jaudiotagger spams tons of INFO logs by default, and there
